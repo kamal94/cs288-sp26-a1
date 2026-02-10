@@ -21,4 +21,4 @@ ENV/
 
 # IDE
 .vscode/
-results
+results/*

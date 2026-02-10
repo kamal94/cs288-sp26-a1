@@ -155,8 +155,7 @@ class PerceptronModel:
             return 0.0
         predictions = [self.predict(dp) for dp in data]
         if save_path:
-            with open(save_path, "w") as f:
-                f.write("\n".join(predictions))
+            save_results(data, predictions, save_path)
         return accuracy(predictions, [dp.label for dp in data])
 
 
