@@ -42,7 +42,9 @@ class Tokenizer:
 
     def _pre_process_text(self, text: str) -> List[str]:
         # TODO: Implement this! Expected # of lines: 5~10
-        raise NotImplementedError
+        return [
+            t.lower() for t in text.split(" ") if t.lower() not in Tokenizer.STOP_WORDS
+        ]
 
     def __init__(self, data: List[DataPoint], max_vocab_size: int = None):
         corpus = " ".join([d.text for d in data])
@@ -56,7 +58,7 @@ class Tokenizer:
 
     def tokenize(self, text: str) -> List[int]:
         # TODO: Implement this! Expected # of lines: 5~10
-        raise NotImplementedError
+        return [self.token2id[token] for token in self._pre_process_text(text)]
 
 
 def get_label_mappings(
@@ -86,9 +88,7 @@ class BOWDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-    def __getitem__(
-        self, idx: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Returns a single example as a tuple of torch.Tensors.
         features_l: The tokenized text of example, shaped (max_length,)
         length: The length of the text, shaped ()
@@ -97,12 +97,23 @@ class BOWDataset(Dataset):
         All of have type torch.int64.
         """
         dp: DataPoint = self.data[idx]
+        tokenized_input = self.tokenizer.tokenize(dp.text)
+        if len(tokenized_input) > self.max_length:
+            tokenized_input = tokenized_input[:self.max_length]
+        elif len(tokenized_input) < self.max_length:
+            tokenized_input += [Tokenizer.TOK_PADDING_INDEX] * (self.max_length - len(tokenized_input))
+        return (
+            torch.tensor(tokenized_input),
+            torch.tensor(len(dp.text)),
+            torch.tensor(int(dp.label)),
+        )
         # TODO: Implement this! Expected # of lines: ~20
-        raise NotImplementedError
 
 
 class MultilayerPerceptronModel(nn.Module):
     """Multi-layer perceptron model for classification."""
+
+    EMBEDDING_DIM = 128
 
     def __init__(self, vocab_size: int, num_classes: int, padding_index: int):
         """Initializes the model.
@@ -113,8 +124,16 @@ class MultilayerPerceptronModel(nn.Module):
         """
         super().__init__()
         self.padding_index = padding_index
+        self.vocab_size = vocab_size
+        self.num_classes = num_classes
+        self.embedding = torch.nn.Embedding(
+            self.vocab_size, self.EMBEDDING_DIM, padding_idx=self.padding_index
+        )
+        self.fc1 = nn.Linear(self.EMBEDDING_DIM, 1024)
+        self.fc2 = nn.Linear(1024, 1024)
+        self.fc3 = nn.Linear(1024, self.num_classes)
+        self.dropout = nn.Dropout(0.1)
         # TODO: Implement this!
-        raise NotImplementedError
 
     def forward(
         self, input_features_b_l: torch.Tensor, input_length_b: torch.Tensor
@@ -128,8 +147,35 @@ class MultilayerPerceptronModel(nn.Module):
         Returns:
             output_b_c: The output of the model.
         """
+        x_embedding = self.embedding(input_features_b_l)
+
+        x = torch.sum(x_embedding, dim=1)
+        x = x / input_length_b.unsqueeze(1).float()
+
+        # print(f"x_embedding:", x_embedding.shape)
+
+        # shape_x1 = x_embedding.shape[-1]
+        # shape_x2 = x_embedding.shape[-2]
+        # print(f"{shape_x1=}, {shape_x2=}")
+        # x = x_embedding.reshape(shape_x1 * shape_x2)
+
+        # print(f"x before fc1:", x.shape)
+        x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
+
+        # print(f"x before fc2:", x.shape)
+        x = torch.relu(self.fc2(x))
+        x = self.dropout(x)
+
+        # print(f"x before fc3:", x.shape)
+        x = self.fc3(x)
+
+        # print(f"x before output layer:", x.shape)
+        x = torch.log_softmax(x, dim=-1)
+        # print("sum of x:", torch.sum(x))
+        return x
+
         # TODO: Implement this!
-        raise NotImplementedError
 
 
 class Trainer:
@@ -146,10 +192,14 @@ class Trainer:
             The predicted class.
 
         """
+        self.model.eval()
         all_predictions = []
         dataloader = DataLoader(data, batch_size=32, shuffle=False)
+        for features_b_l, lengths_b, labels_b in dataloader:
+            output_b_c = self.model(features_b_l, lengths_b)
+            all_predictions.extend(output_b_c.argmax(dim=-1).tolist())
+        return all_predictions
         # TODO: Implement this!
-        raise NotImplementedError
 
     def evaluate(self, data: BOWDataset) -> float:
         """Evaluates the model on a dataset.
@@ -161,7 +211,13 @@ class Trainer:
             The accuracy of the model.
         """
         # TODO: Implement this!
-        raise NotImplementedError
+        self.model.eval()
+        all_predictions = []
+        dataloader = DataLoader(data, batch_size=32, shuffle=False)
+        for features_b_l, lengths_b, labels_b in dataloader:
+            output_b_c = self.model(features_b_l, lengths_b)
+            all_predictions.extend(output_b_c.argmax(dim=-1).tolist())
+        return accuracy(all_predictions, data.labels)
 
     def train(
         self,
@@ -181,16 +237,31 @@ class Trainer:
             num_epochs: The number of training epochs.
         """
         torch.manual_seed(0)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adagrad(self.model.parameters())
+        running_loss = 0.0
+
         for epoch in range(num_epochs):
             self.model.train()
             total_loss = 0
             dataloader = DataLoader(training_data, batch_size=4, shuffle=True)
             for inputs_b_l, lengths_b, labels_b in tqdm(dataloader):
-                # TODO: Implement this!
-                raise NotImplementedError
-            per_dp_loss = 0
+              inputs_in_cuda = inputs_b_l.cuda()
+              lengths_in_cuda = lengths_b.cuda()
+              labels_in_cuda = torch.tensor(labels_b).cuda()
+              
+              # zero the parameter gradients
+              optimizer.zero_grad()
+      
+              # forward + backward + optimize
+              outputs = self.model(inputs_in_cuda, lengths_in_cuda)
+              loss = criterion(outputs, labels_in_cuda)
+              per_dp_loss = loss.item()
+              total_loss += per_dp_loss
+              loss.backward()
+              optimizer.step()
 
-            self.model.eval()
+            # TODO: Implement this!
             val_acc = self.evaluate(val_data)
 
             print(
@@ -207,9 +278,7 @@ if __name__ == "__main__":
         default="sst2",
         help="Data source, one of ('sst2', 'newsgroups')",
     )
-    parser.add_argument(
-        "-e", "--epochs", type=int, default=3, help="Number of epochs"
-    )
+    parser.add_argument("-e", "--epochs", type=int, default=3, help="Number of epochs")
     parser.add_argument(
         "-l", "--learning_rate", type=float, default=0.001, help="Learning rate"
     )
