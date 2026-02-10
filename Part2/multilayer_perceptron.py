@@ -25,6 +25,7 @@ import os
 from collections import Counter
 from pprint import pprint
 from typing import Dict, List, Tuple
+import re
 
 import pandas as pd
 import torch
@@ -43,7 +44,7 @@ class Tokenizer:
     def _pre_process_text(self, text: str) -> List[str]:
         # TODO: Implement this! Expected # of lines: 5~10
         return [
-            t.lower() for t in text.split(" ") if t.lower() not in Tokenizer.STOP_WORDS
+            t.lower() for t in re.split(r'[\s\W]+', text) if t and t.lower() not in Tokenizer.STOP_WORDS
         ]
 
     def __init__(self, data: List[DataPoint], max_vocab_size: int = None):
@@ -54,18 +55,20 @@ class Tokenizer:
         # offset because padding index is 0
         self.token2id = {t: (i + 1) for i, t in enumerate(tokens)}
         self.token2id["<PAD>"] = Tokenizer.TOK_PADDING_INDEX
+        # self.token2id["<UNK>"] = len(tokens) + 1
         self.id2token = {i: t for t, i in self.token2id.items()}
+        # self.unk_id = self.token2id["<UNK>"]
 
     def tokenize(self, text: str) -> List[int]:
         # TODO: Implement this! Expected # of lines: 5~10
-        return [self.token2id[token] for token in self._pre_process_text(text)]
+        return [self.token2id.get(token, self.TOK_PADDING_INDEX) for token in self._pre_process_text(text)]
 
 
 def get_label_mappings(
     data: List[DataPoint],
 ) -> Tuple[Dict[str, int], Dict[int, str]]:
     """Reads the labels file and returns the mapping."""
-    labels = list(set([d.label for d in data]))
+    labels = sorted(list(set([d.label for d in data])))
     label2id = {label: index for index, label in enumerate(labels)}
     id2label = {index: label for index, label in enumerate(labels)}
     return label2id, id2label
@@ -98,14 +101,19 @@ class BOWDataset(Dataset):
         """
         dp: DataPoint = self.data[idx]
         tokenized_input = self.tokenizer.tokenize(dp.text)
+        len_tokenized_input_before_padding = min(len(tokenized_input), self.max_length)
         if len(tokenized_input) > self.max_length:
             tokenized_input = tokenized_input[:self.max_length]
         elif len(tokenized_input) < self.max_length:
             tokenized_input += [Tokenizer.TOK_PADDING_INDEX] * (self.max_length - len(tokenized_input))
+        # if dp.label is None:
+        #     print(f"Label for data point {dp.id} is None")
+        #     print(f"dp: {dp}")
+
         return (
             torch.tensor(tokenized_input),
-            torch.tensor(len(dp.text)),
-            torch.tensor(int(dp.label)),
+            torch.tensor(len_tokenized_input_before_padding),
+            torch.tensor(self.label2id[dp.label] if dp.label is not None else 0),
         )
         # TODO: Implement this! Expected # of lines: ~20
 
@@ -113,7 +121,7 @@ class BOWDataset(Dataset):
 class MultilayerPerceptronModel(nn.Module):
     """Multi-layer perceptron model for classification."""
 
-    EMBEDDING_DIM = 128
+    EMBEDDING_DIM = 512
 
     def __init__(self, vocab_size: int, num_classes: int, padding_index: int):
         """Initializes the model.
@@ -131,8 +139,11 @@ class MultilayerPerceptronModel(nn.Module):
         )
         self.fc1 = nn.Linear(self.EMBEDDING_DIM, 1024)
         self.fc2 = nn.Linear(1024, 1024)
-        self.fc3 = nn.Linear(1024, self.num_classes)
-        self.dropout = nn.Dropout(0.1)
+        self.fc3 = nn.Linear(1024, 1024)
+        self.fc4 = nn.Linear(1024, 1024)
+        self.fc5 = nn.Linear(1024, self.num_classes)
+        self.dropout = nn.Dropout(0.25)
+
         # TODO: Implement this!
 
     def forward(
@@ -150,7 +161,7 @@ class MultilayerPerceptronModel(nn.Module):
         x_embedding = self.embedding(input_features_b_l)
 
         x = torch.sum(x_embedding, dim=1)
-        x = x / input_length_b.unsqueeze(1).float()
+        x = x / input_length_b.clamp(min=1).unsqueeze(1).float()
 
         # print(f"x_embedding:", x_embedding.shape)
 
@@ -167,11 +178,17 @@ class MultilayerPerceptronModel(nn.Module):
         x = torch.relu(self.fc2(x))
         x = self.dropout(x)
 
+        x = torch.relu(self.fc3(x))
+        x = self.dropout(x)
+
+        x = torch.relu(self.fc4(x))
+        x = self.dropout(x)
+
         # print(f"x before fc3:", x.shape)
-        x = self.fc3(x)
+        x = self.fc5(x)
 
         # print(f"x before output layer:", x.shape)
-        x = torch.log_softmax(x, dim=-1)
+        # x = torch.softmax(x, dim=1)
         # print("sum of x:", torch.sum(x))
         return x
 
@@ -193,12 +210,15 @@ class Trainer:
 
         """
         self.model.eval()
-        all_predictions = []
-        dataloader = DataLoader(data, batch_size=32, shuffle=False)
-        for features_b_l, lengths_b, labels_b in dataloader:
-            output_b_c = self.model(features_b_l, lengths_b)
-            all_predictions.extend(output_b_c.argmax(dim=-1).tolist())
-        return all_predictions
+        with torch.no_grad():
+            all_predictions = []
+            dataloader = DataLoader(data, batch_size=128, shuffle=False)
+            for features_b_l, lengths_b, labels_b in dataloader:
+                output_b_c = self.model(features_b_l, lengths_b)
+                output_b_c = torch.softmax(output_b_c, dim=1)
+                # print("probability sum:", torch.sum(output_b_c, dim=1))
+                all_predictions.extend(output_b_c.argmax(dim=-1).tolist())
+            return all_predictions
         # TODO: Implement this!
 
     def evaluate(self, data: BOWDataset) -> float:
@@ -212,12 +232,18 @@ class Trainer:
         """
         # TODO: Implement this!
         self.model.eval()
-        all_predictions = []
-        dataloader = DataLoader(data, batch_size=32, shuffle=False)
-        for features_b_l, lengths_b, labels_b in dataloader:
-            output_b_c = self.model(features_b_l, lengths_b)
-            all_predictions.extend(output_b_c.argmax(dim=-1).tolist())
-        return accuracy(all_predictions, data.labels)
+        with torch.no_grad():
+            all_predictions = []
+            dataloader = DataLoader(data, batch_size=128, shuffle=False)
+            labels = []
+            for features_b_l, lengths_b, labels_b in dataloader:
+                output_b_c = self.model(features_b_l, lengths_b)
+                # print("output_b_c shape:", output_b_c.shape)
+                # print("probability sum:", torch.sum(output_b_c, dim=1))
+                all_predictions.extend(output_b_c.argmax(dim=-1).tolist())
+                labels.extend(labels_b.tolist())
+            # print(f"{len(labels)=}, {len(all_predictions)=}")
+            return accuracy(all_predictions, labels)
 
     def train(
         self,
@@ -238,24 +264,19 @@ class Trainer:
         """
         torch.manual_seed(0)
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adagrad(self.model.parameters())
-        running_loss = 0.0
 
         for epoch in range(num_epochs):
             self.model.train()
             total_loss = 0
-            dataloader = DataLoader(training_data, batch_size=4, shuffle=True)
+            dataloader = DataLoader(training_data, batch_size=32, shuffle=True)
             for inputs_b_l, lengths_b, labels_b in tqdm(dataloader):
-              inputs_in_cuda = inputs_b_l.cuda()
-              lengths_in_cuda = lengths_b.cuda()
-              labels_in_cuda = torch.tensor(labels_b).cuda()
               
               # zero the parameter gradients
               optimizer.zero_grad()
       
               # forward + backward + optimize
-              outputs = self.model(inputs_in_cuda, lengths_in_cuda)
-              loss = criterion(outputs, labels_in_cuda)
+              outputs = self.model(inputs_b_l, lengths_b)
+              loss = criterion(outputs, labels_b)
               per_dp_loss = loss.item()
               total_loss += per_dp_loss
               loss.backward()
@@ -265,7 +286,7 @@ class Trainer:
             val_acc = self.evaluate(val_data)
 
             print(
-                f"Epoch: {epoch + 1:<2} | Loss: {per_dp_loss:.2f} | Val accuracy: {100 * val_acc:.2f}%"
+                f"Epoch: {epoch + 1:<2} | Loss: {total_loss / len(dataloader):.4f} | Val accuracy: {100 * val_acc:.2f}%"
             )
 
 
@@ -292,8 +313,6 @@ if __name__ == "__main__":
 
     tokenizer = Tokenizer(train_data, max_vocab_size=20000)
     label2id, id2label = get_label_mappings(train_data)
-    print("Id to label mapping:")
-    pprint(id2label)
 
     max_length = 100
     train_ds = BOWDataset(train_data, tokenizer, label2id, max_length)

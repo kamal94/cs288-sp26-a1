@@ -1,3 +1,12 @@
+# Results and Observations
+
+### Batching Efficiency
+When running batch size = 1, each epoch takes approximately 25 seconds (mean=25.4, std=6.62, n=10) to run.
+When running batch size = 8, each epoch takes approximately 3 seconds (mean=3, std=0.4, n=10) second to run.
+When running batch size = 32, each epoch takes approximately 3 seconds (mean=1, std=0,n=10) second to run (granularity was at the second level, so it was rounded to the nearest second)
+
+
+
 # Commands
 
 ## Virtual environment creation
