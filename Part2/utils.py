@@ -26,12 +26,22 @@ def read_labeled_data(
     data_filename: str, labels_filename: str
 ) -> List[DataPoint]:
     # TODO: implement this! Expected # of lines: <10
-    raise NotImplementedError
+    csv_data = pd.read_csv(data_filename)
+    csv_labels = pd.read_csv(labels_filename)
+    merged_df = pd.merge(csv_data, csv_labels, on='id')
+    data: List[DataPoint] = []
+    for index, row in merged_df.iterrows():
+        data.append(DataPoint(row['id'], row['text'], str(row['label'])))
+    return data
 
 
 def read_unlabeled_data(data_filename: str) -> List[DataPoint]:
     # TODO: implement this! Expected # of lines: <10
-    raise NotImplementedError
+    csv_test_data = pd.read_csv(data_filename)
+    test_data: List[DataPoint] = []
+    for index, row in csv_test_data.iterrows():
+        test_data.append(DataPoint(row['id'], row['text'], None))
+    return test_data
 
 
 def load_data(
