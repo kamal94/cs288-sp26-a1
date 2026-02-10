@@ -106,9 +106,6 @@ class BOWDataset(Dataset):
             tokenized_input = tokenized_input[:self.max_length]
         elif len(tokenized_input) < self.max_length:
             tokenized_input += [Tokenizer.TOK_PADDING_INDEX] * (self.max_length - len(tokenized_input))
-        # if dp.label is None:
-        #     print(f"Label for data point {dp.id} is None")
-        #     print(f"dp: {dp}")
 
         return (
             torch.tensor(tokenized_input),
@@ -139,8 +136,8 @@ class MultilayerPerceptronModel(nn.Module):
         )
         self.fc1 = nn.Linear(self.EMBEDDING_DIM, 1024)
         self.fc2 = nn.Linear(1024, 1024)
-        self.fc3 = nn.Linear(1024, 1024)
-        self.fc4 = nn.Linear(1024, 1024)
+        # self.fc3 = nn.Linear(1024, 1024)
+        # self.fc4 = nn.Linear(1024, 1024)
         self.fc5 = nn.Linear(1024, self.num_classes)
         self.dropout = nn.Dropout(0.25)
 
@@ -178,11 +175,11 @@ class MultilayerPerceptronModel(nn.Module):
         x = torch.relu(self.fc2(x))
         x = self.dropout(x)
 
-        x = torch.relu(self.fc3(x))
-        x = self.dropout(x)
+        # x = torch.relu(self.fc3(x))
+        # x = self.dropout(x)
 
-        x = torch.relu(self.fc4(x))
-        x = self.dropout(x)
+        # x = torch.relu(self.fc4(x))
+        # x = self.dropout(x)
 
         # print(f"x before fc3:", x.shape)
         x = self.fc5(x)
@@ -314,7 +311,7 @@ if __name__ == "__main__":
     tokenizer = Tokenizer(train_data, max_vocab_size=20000)
     label2id, id2label = get_label_mappings(train_data)
 
-    max_length = 100
+    max_length = 300
     train_ds = BOWDataset(train_data, tokenizer, label2id, max_length)
     val_ds = BOWDataset(val_data, tokenizer, label2id, max_length)
     dev_ds = BOWDataset(dev_data, tokenizer, label2id, max_length)
