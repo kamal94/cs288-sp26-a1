@@ -9,6 +9,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Set
+import random
 
 from features import make_featurize
 from tqdm import tqdm
@@ -25,7 +26,11 @@ def featurize_data(
 ) -> List[DataPointWithFeatures]:
     """Add features to each datapoint based on feature types"""
     # TODO: Implement this!
-    raise NotImplementedError
+    featurize = make_featurize(feature_types)
+    return [
+        DataPointWithFeatures(dp.id, dp.text, dp.label, featurize(dp.text))
+        for dp in data
+    ]
 
 
 class PerceptronModel:
@@ -49,8 +54,14 @@ class PerceptronModel:
         Returns:
             The output score.
         """
+        # print(datapoint.features)
         # TODO: Implement this! Expected # of lines: <10
-        raise NotImplementedError
+        return sum(
+            [
+                self.weights[self._get_weight_key(feature, label)]
+                for feature in datapoint.features
+            ]
+        )
 
     def predict(self, datapoint: DataPointWithFeatures) -> str:
         """Predicts a label for an input.
@@ -62,7 +73,18 @@ class PerceptronModel:
             The predicted class.
         """
         # TODO: Implement this! Expected # of lines: <5
-        raise NotImplementedError
+        if datapoint.label: self.labels.add(datapoint.label)
+        max_score = -1
+        max_label = list(self.labels)[0]
+        for label in self.labels:
+            score = self.score(datapoint, label)
+            if score > max_score:
+                max_score = score
+                max_label = label
+        return max_label
+
+    # def sigmoid(self, z: float) -> float:
+    #     return 1 / (1 + math.exp(-z))
 
     def update_parameters(
         self, datapoint: DataPointWithFeatures, prediction: str, lr: float
@@ -75,7 +97,11 @@ class PerceptronModel:
             lr: Learning rate.
         """
         # TODO: Implement this! Expected # of lines: <10
-        raise NotImplementedError
+        if prediction == datapoint.label:
+            return
+        for feature in datapoint.features:
+            self.weights[self._get_weight_key(feature, prediction)] -= lr
+            self.weights[self._get_weight_key(feature, datapoint.label)] += lr
 
     def train(
         self,
@@ -95,7 +121,15 @@ class PerceptronModel:
             lr: Learning rate.
         """
         # TODO: Implement this!
-        raise NotImplementedError
+        for epoch in range(num_epochs):
+            random.shuffle(training_data)
+            for dp in training_data:
+                prediction = self.predict(dp)
+                self.update_parameters(dp, prediction, lr)
+            
+            val_acc = self.evaluate(val_data)
+            print(f"Epoch {epoch}, Validation accuracy: {val_acc}")
+        # raise NotImplementedError
 
     def save_weights(self, path: str) -> None:
         with open(path, "w") as f:
@@ -117,7 +151,13 @@ class PerceptronModel:
             accuracy (float): The accuracy of the model on the data.
         """
         # TODO: Implement this!
-        raise NotImplementedError
+        if len(data) == 0:
+            return 0.0
+        predictions = [self.predict(dp) for dp in data]
+        if save_path:
+            with open(save_path, "w") as f:
+                f.write("\n".join(predictions))
+        return accuracy(predictions, [dp.label for dp in data])
 
 
 if __name__ == "__main__":
@@ -136,9 +176,7 @@ if __name__ == "__main__":
         default="bow",
         help="Feature type, e.g., bow+len",
     )
-    parser.add_argument(
-        "-e", "--epochs", type=int, default=3, help="Number of epochs"
-    )
+    parser.add_argument("-e", "--epochs", type=int, default=3, help="Number of epochs")
     parser.add_argument(
         "-l", "--learning_rate", type=float, default=0.1, help="Learning rate"
     )
@@ -150,11 +188,11 @@ if __name__ == "__main__":
     lr: float = args.learning_rate
 
     train_data, val_data, dev_data, test_data = load_data(data_type)
+    
     train_data = featurize_data(train_data, feature_types)
     val_data = featurize_data(val_data, feature_types)
     dev_data = featurize_data(dev_data, feature_types)
     test_data = featurize_data(test_data, feature_types)
-
     model = PerceptronModel()
     print("Training the model...")
     model.train(train_data, val_data, num_epochs, lr)
@@ -179,7 +217,5 @@ if __name__ == "__main__":
     )
 
     model.save_weights(
-        os.path.join(
-            "results", f"perceptron_{args.data}_{args.features}_model.json"
-        )
+        os.path.join("results", f"perceptron_{args.data}_{args.features}_model.json")
     )
