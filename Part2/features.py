@@ -24,8 +24,14 @@ class BagOfWords(FeatureMap):
     @classmethod
     def featurize(self, text: str) -> Dict[str, float]:
         # TODO: implement this! Expected # of lines: <5
-        raise NotImplementedError
-        return self.prefix_with_name({})
+        counts = {}
+        words = text.lower().split()
+        for word in words:
+            if word in self.STOP_WORDS: continue
+            bow_key = self.name+"/"+word
+            if bow_key in counts: continue
+            counts[bow_key] = 1.0
+        return counts
 
 
 class SentenceLength(FeatureMap):
