@@ -6,6 +6,13 @@ When running batch size = 8, each epoch takes approximately 3 seconds (mean=3, s
 When running batch size = 32, each epoch takes approximately 3 seconds (mean=1, std=0,n=10) second to run (granularity was at the second level, so it was rounded to the nearest second)
 
 
+### Optimizer Performance
+When using AdaGrad, the model accuracy couldn't surpass 70% on the validation set of the sst2 dataset. 
+When using Adam, the model accuracy surpassed 70% and reached 78% on occasion on the validation set of the sst2 dataset.
+The gap in the observed accuracy score was also present when testing with the newsgroups dataset.
+
+### Activation Functions
+We also tried using different activation functions (tanh, sigmoid, and ReLU). We noticed a slight degradation with sigmoid and tanh, and noticed that ReLU performed much better than the rest. This is likely due to the fact that ReLU limits the gradient to between 0 and 1, which can help prevent the vanishing gradient problem.
 
 # Commands
 
